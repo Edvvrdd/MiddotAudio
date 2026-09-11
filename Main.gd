@@ -534,6 +534,21 @@ func _on_audition_pressed() -> void:
 func _on_assets_list_item_activated(_index: int) -> void:
 	_open_rename_popup("asset")
 
+## Preview one file (Sound node ▶ button) with the event's bus/volume.
+func _audition_file(file: String) -> void:
+	if file.is_empty() or _selected.is_empty():
+		return
+	var bus := "Master"
+	var vol := 100.0
+	for n in backend.get_canvas(_selected)["nodes"]:
+		if n["type"] == "event_output":
+			bus = n["data"].get("bus", "Master")
+			vol = n["data"].get("volume", 100.0)
+			break
+	_auditioner.play({"trigger": "simple", "audio_file": file, "bus": bus,
+		"volume_db": linear_to_db(clampf(vol / 100.0, 0.0001, 1.0)), "looping": false},
+		_audio_dir(), backend.buses, backend.bus_volumes, backend.variables)
+
 func _on_events_list_item_activated(_index: int) -> void:
 	_open_rename_popup("event")
 

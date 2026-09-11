@@ -42,3 +42,7 @@ func select_event(name: String) -> void:
 func selected_event() -> Dictionary:
 	_sync()
 	return main.backend.events.get(selected, {})
+
+## Play a single file (Sound node preview) with the event's bus/volume.
+func audition_file(file: String) -> void:
+	main._audition_file(file)
