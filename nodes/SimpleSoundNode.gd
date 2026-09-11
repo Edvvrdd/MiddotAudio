@@ -31,12 +31,27 @@ func create_node(data: Dictionary, node_name: String, ctx: NodeCtx) -> GraphNode
 	var play_btn := Button.new()
 	play_btn.text = "▶"
 	play_btn.tooltip_text = "Preview this file"
-	play_btn.pressed.connect(func() -> void: ctx.audition_file(data.get("audio_file", "")))
+	play_btn.pressed.connect(func() -> void: ctx.audition_file(data))
 	sound.get_titlebar_hbox().add_child(play_btn)
 	var file_edit: LineEdit = load("res://AssetDropEdit.gd").new()
 	file_edit.text = data.get("audio_file", "")
 	file_edit.text_changed.connect(func(t: String) -> void: data["audio_file"] = t)
 	file_edit.custom_minimum_size = Vector2(160, 0)
 	sound.add_child(file_edit)
+	var vol := HSlider.new()
+	vol.min_value = 0.0
+	vol.max_value = 100.0
+	vol.value = data.get("volume", 100.0)
+	vol.custom_minimum_size = Vector2(160, 0)
+	vol.value_changed.connect(func(v: float) -> void: data["volume"] = v)
+	sound.add_child(vol)
+	var pitch := HSlider.new()
+	pitch.min_value = 0.1
+	pitch.max_value = 4.0
+	pitch.step = 0.05
+	pitch.value = data.get("pitch", 1.0)
+	pitch.custom_minimum_size = Vector2(160, 0)
+	pitch.value_changed.connect(func(v: float) -> void: data["pitch"] = v)
+	sound.add_child(pitch)
 	sound.set_slot(0, true, 0, Color.WHITE, true, 0, Color.WHITE)
 	return sound

@@ -534,8 +534,10 @@ func _on_audition_pressed() -> void:
 func _on_assets_list_item_activated(_index: int) -> void:
 	_open_rename_popup("asset")
 
-## Preview one file (Sound node ▶ button) with the event's bus/volume.
-func _audition_file(file: String) -> void:
+## Preview one file (Sound node ▶ button) with the event's bus/volume and
+## the node's own volume/pitch.
+func _audition_file(node_data: Dictionary) -> void:
+	var file: String = node_data.get("audio_file", "")
 	if file.is_empty() or _selected.is_empty():
 		return
 	var bus := "Master"
@@ -545,9 +547,15 @@ func _audition_file(file: String) -> void:
 			bus = n["data"].get("bus", "Master")
 			vol = n["data"].get("volume", 100.0)
 			break
-	_auditioner.play({"trigger": "simple", "audio_file": file, "bus": bus,
-		"volume_db": linear_to_db(clampf(vol / 100.0, 0.0001, 1.0)), "looping": false},
-		_audio_dir(), backend.buses, backend.bus_volumes, backend.variables)
+	var tree := {"trigger": "simple", "audio_file": file, "bus": bus,
+		"volume_db": linear_to_db(clampf(vol / 100.0, 0.0001, 1.0)), "looping": false}
+	var node_vol: float = node_data.get("volume", 100.0)
+	if not is_equal_approx(node_vol, 100.0):
+		tree["file_volume_db"] = linear_to_db(clampf(node_vol / 100.0, 0.0001, 1.0))
+	var node_pitch: float = node_data.get("pitch", 1.0)
+	if not is_equal_approx(node_pitch, 1.0):
+		tree["pitch_scale"] = node_pitch
+	_auditioner.play(tree, _audio_dir(), backend.buses, backend.bus_volumes, backend.variables)
 
 func _on_events_list_item_activated(_index: int) -> void:
 	_open_rename_popup("event")

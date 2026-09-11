@@ -12,6 +12,7 @@ var _audio_dir := ""
 var _variables := {}
 var _last_shuffle := -1
 var _tree := {}
+var _base_db := 0.0
 
 func is_playing() -> bool:
 	return _p != null and _p.playing
@@ -31,7 +32,8 @@ func play(tree: Dictionary, audio_dir: String, buses: Dictionary, bus_volumes: D
 	_p = AudioStreamPlayer.new()
 	add_child(_p)
 	_p.bus = tree.get("bus", "Master")
-	_p.volume_db = tree.get("volume_db", 0.0)
+	_base_db = tree.get("volume_db", 0.0)
+	_p.volume_db = _base_db
 	_play_node(_p, tree, _on_tree_done)
 
 func _on_tree_done() -> void:
@@ -46,7 +48,7 @@ func _on_tree_done() -> void:
 func _play_node(p: AudioStreamPlayer, t: Dictionary, done: Callable) -> void:
 	match t.get("trigger", "simple"):
 		"simple":
-			_play_leaf(p, t.get("audio_file", ""), done)
+			_play_leaf(p, t, done)
 		"random":
 			var kids: Array = t.get("sounds", [])
 			if kids.is_empty():
@@ -79,7 +81,8 @@ func _play_seq(p: AudioStreamPlayer, sounds: Array, i: int, loop: bool, done: Ca
 		return
 	_play_node(p, sounds[i], func() -> void: _play_seq(p, sounds, i + 1, loop, done))
 
-func _play_leaf(p: AudioStreamPlayer, file: String, done: Callable) -> void:
+func _play_leaf(p: AudioStreamPlayer, t: Dictionary, done: Callable) -> void:
+	var file: String = t.get("audio_file", "")
 	if file.is_empty():
 		done.call()
 		return
@@ -93,6 +96,8 @@ func _play_leaf(p: AudioStreamPlayer, file: String, done: Callable) -> void:
 		push_warning("Audition: cannot load %s" % path)
 		done.call()
 		return
+	p.volume_db = _base_db + t.get("file_volume_db", 0.0)
+	p.pitch_scale = t.get("pitch_scale", 1.0)
 	p.stream = stream
 	p.play()
 	p.finished.connect(done, CONNECT_ONE_SHOT)

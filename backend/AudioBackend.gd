@@ -120,7 +120,7 @@ func place_node(event_name: String, type_name: String, pos: Vector2) -> int:
 func default_data_for(type_name: String) -> Dictionary:
 	match type_name:
 		"sound":
-			return {"audio_file": ""}
+			return {"audio_file": "", "volume": 100.0, "pitch": 1.0}
 		"random_trigger":
 			return {"random_mode": "shuffle", "pins": 1}
 		"playlist_trigger":
@@ -347,7 +347,14 @@ func _compile_node(id: int, c: Dictionary, event_name: String, visited: Dictiona
 		return {}
 	match node["type"]:
 		"sound":
-			return {"trigger": "simple", "audio_file": node["data"].get("audio_file", "")}
+			var t := {"trigger": "simple", "audio_file": node["data"].get("audio_file", "")}
+			var vol: float = node["data"].get("volume", 100.0)
+			if not is_equal_approx(vol, 100.0):
+				t["file_volume_db"] = linear_to_db(clampf(vol / 100.0, 0.0001, 1.0))
+			var pitch: float = node["data"].get("pitch", 1.0)
+			if not is_equal_approx(pitch, 1.0):
+				t["pitch_scale"] = pitch
+			return t
 		"random_trigger":
 			return {"trigger": "random", "random_mode": node["data"].get("random_mode", "random"),
 				"sounds": _compile_children(node, c, event_name, visited, depth, out_id)}
