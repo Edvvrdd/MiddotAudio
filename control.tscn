@@ -1,0 +1,186 @@
+[gd_scene load_steps=6 format=3 uid="uid://c4847rw5mfeuq"]
+
+[ext_resource type="Script" uid="uid://blmio6srnyuoh" path="res://Main.gd" id="1_0fbet"]
+
+[ext_resource type="Script" path="res://AssetList.gd" id="2_assets"]
+
+[ext_resource type="Script" path="res://AssetDropGraph.gd" id="3_graph"]
+
+[ext_resource type="Script" path="res://AppMenuBar.gd" id="4_menubar"]
+
+[sub_resource type="ButtonGroup" id="2"]
+
+[node name="Control" type="Control" unique_id=1481215007]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_0fbet")
+
+[node name="Root" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MenuBar" type="HBoxContainer" parent="Root"]
+unique_name_in_owner = true
+layout_mode = 2
+script = ExtResource("4_menubar")
+
+[node name="HSplit" type="HSplitContainer" parent="Root"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="LeftColumn" type="VBoxContainer" parent="Root/HSplit"]
+layout_mode = 2
+custom_minimum_size = Vector2(240, 0)
+
+[node name="LeftTabs" type="HBoxContainer" parent="Root/HSplit/LeftColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="EventsTabButton" type="Button" parent="Root/HSplit/LeftColumn/LeftTabs"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+button_pressed = true
+button_group = SubResource("2")
+text = "Events"
+
+[node name="AssetsTabButton" type="Button" parent="Root/HSplit/LeftColumn/LeftTabs"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+button_group = SubResource("2")
+text = "Assets"
+
+[node name="PlaceholderTabButton" type="Button" parent="Root/HSplit/LeftColumn/LeftTabs"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+button_group = SubResource("2")
+text = "..."
+
+[node name="LeftPanels" type="Control" parent="Root/HSplit/LeftColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="EventsPanel" type="VBoxContainer" parent="Root/HSplit/LeftColumn/LeftPanels"]
+unique_name_in_owner = true
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="EventsList" type="ItemList" parent="Root/HSplit/LeftColumn/LeftPanels/EventsPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="AddEventButton" type="Button" parent="Root/HSplit/LeftColumn/LeftPanels/EventsPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Add Event"
+
+[node name="AssetsPanel" type="VBoxContainer" parent="Root/HSplit/LeftColumn/LeftPanels"]
+unique_name_in_owner = true
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="AssetsList" type="ItemList" parent="Root/HSplit/LeftColumn/LeftPanels/AssetsPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+script = ExtResource("2_assets")
+
+[node name="MixerPanel" type="VBoxContainer" parent="Root/HSplit/LeftColumn/LeftPanels"]
+unique_name_in_owner = true
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MixerList" type="ItemList" parent="Root/HSplit/LeftColumn/LeftPanels/MixerPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="VariablesTabButton" type="Button" parent="Root/HSplit/LeftColumn/LeftTabs"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+toggle_mode = true
+button_group = SubResource("2")
+text = "Variables"
+
+[node name="VariablesPanel" type="VBoxContainer" parent="Root/HSplit/LeftColumn/LeftPanels"]
+unique_name_in_owner = true
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VariablesList" type="ItemList" parent="Root/HSplit/LeftColumn/LeftPanels/VariablesPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="AddVariableButton" type="Button" parent="Root/HSplit/LeftColumn/LeftPanels/VariablesPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "+ Add Variable"
+
+[node name="EditorPane" type="VBoxContainer" parent="Root/HSplit"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="EditorHeader" type="Label" parent="Root/HSplit/EditorPane"]
+layout_mode = 2
+text = "Select an event to edit its properties."
+
+[node name="EventGraph" type="GraphEdit" parent="Root/HSplit/EditorPane"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+script = ExtResource("3_graph")
+
+[node name="ExportButton" type="Button" parent="Root/HSplit/EditorPane"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 8
+text = "Export..."
+
+[node name="FileDialog" type="FileDialog" parent="."]
+access = 2
+filters = PackedStringArray("*.tres")
+
+[node name="ProjectDialog" type="FileDialog" parent="."]
+unique_name_in_owner = true
+access = 2
+size = Vector2i(700, 450)
+
+[node name="RenamePopup" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+size = Vector2i(360, 100)
+
+[node name="RenameField" type="LineEdit" parent="RenamePopup"]
+unique_name_in_owner = true
+layout_mode = 2
