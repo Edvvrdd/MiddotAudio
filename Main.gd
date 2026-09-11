@@ -26,6 +26,8 @@ func _on_backend_changed(what: String) -> void:
 			if _mixer_view:
 				_build_bus_graph()
 		"all", "project":
+			if _auditioner:
+				_auditioner.stop()
 			_refresh_events_list()
 			_refresh_assets_list()
 			if _variables_view:
@@ -53,6 +55,7 @@ func redo() -> void:
 @onready var event_graph: GraphEdit = %EventGraph
 
 var _node_ctx: NodeCtx
+var _auditioner: Auditioner
 
 var backend: AudioBackend
 
@@ -95,6 +98,10 @@ func _ready() -> void:
 	event_graph.connection_request.connect(_on_bus_connection_request)
 	event_graph.disconnection_request.connect(_on_bus_disconnection_request)
 	_apply_theme_overrides()
+	_auditioner = Auditioner.new()
+	add_child(_auditioner)
+	%AuditionButton.pressed.connect(_on_audition_pressed)
+	%AuditionStopButton.pressed.connect(func() -> void: _auditioner.stop())
 	var bus_menu := PopupMenu.new()
 	bus_menu.name = "BusContextMenu"
 	bus_menu.add_item("Add Bus", 0)
@@ -501,11 +508,28 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			undo()
 		get_viewport().set_input_as_handled()
 		return
+	if event is InputEventKey and event.pressed and event.keycode == KEY_F5:
+		_on_audition_pressed()
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and event.keycode == KEY_F2:
 		if %AssetsPanel.visible and not %AssetsList.get_selected_items().is_empty():
 			_open_rename_popup("asset")
 		elif %EventsPanel.visible and not events_list.get_selected_items().is_empty():
 			_open_rename_popup("event")
+
+## Audition (F5): play the selected event's compiled tree in-app.
+func _on_audition_pressed() -> void:
+	if _mixer_view or _variables_view:
+		return
+	if _selected.is_empty():
+		push_warning("Audition: select an event first")
+		return
+	var tree: Dictionary = backend.compile_event(_selected)
+	if tree.is_empty():
+		push_warning("Audition: event '%s' does not compile (see errors)" % _selected)
+		return
+	_auditioner.play(tree, _audio_dir(), backend.buses, backend.bus_volumes, backend.variables)
 
 func _on_assets_list_item_activated(_index: int) -> void:
 	_open_rename_popup("asset")
@@ -602,6 +626,7 @@ func _on_add_event_button_pressed() -> void:
 	_refresh_events_list()
 
 func _on_events_list_item_selected(index: int) -> void:
+	_auditioner.stop()
 	_selected = events_list.get_item_text(index)
 	_build_graph()
 

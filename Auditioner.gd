@@ -1,0 +1,154 @@
+class_name Auditioner
+extends Node
+
+## Audition: plays a compiled event tree in the authoring app (F5 preview).
+## Honors trigger semantics (simple/random/shuffle/playlist/conditional),
+## event bus routing + volume, and the event's looping flag. One voice —
+## audition previews one event at a time; the target parser handles polyphony.
+## ponytail: single reusable voice; per-voice polyphony when audition needs chords.
+
+var _p: AudioStreamPlayer
+var _audio_dir := ""
+var _variables := {}
+var _last_shuffle := -1
+var _tree := {}
+
+func is_playing() -> bool:
+	return _p != null and _p.playing
+
+func stop() -> void:
+	if _p:
+		_p.queue_free()
+		_p = null
+	_last_shuffle = -1
+
+func play(tree: Dictionary, audio_dir: String, buses: Dictionary, bus_volumes: Dictionary, variables: Dictionary) -> void:
+	stop()
+	_audio_dir = audio_dir
+	_variables = variables
+	_tree = tree
+	_setup_bus(tree.get("bus", "Master"), buses, bus_volumes)
+	_p = AudioStreamPlayer.new()
+	add_child(_p)
+	_p.bus = tree.get("bus", "Master")
+	_p.volume_db = tree.get("volume_db", 0.0)
+	_play_node(_p, tree, _on_tree_done)
+
+func _on_tree_done() -> void:
+	if _p == null:
+		return  # stopped while playing
+	if _tree.get("looping", false):
+		_play_node(_p, _tree, _on_tree_done)
+	else:
+		stop()
+
+## Recursively play `t` on voice `p`; `done` fires when the tree finishes.
+func _play_node(p: AudioStreamPlayer, t: Dictionary, done: Callable) -> void:
+	match t.get("trigger", "simple"):
+		"simple":
+			_play_leaf(p, t.get("audio_file", ""), done)
+		"random":
+			var kids: Array = t.get("sounds", [])
+			if kids.is_empty():
+				done.call()
+				return
+			var idx := randi() % kids.size()
+			if t.get("random_mode", "random") == "shuffle" and kids.size() > 1 and idx == _last_shuffle:
+				idx = (idx + 1) % kids.size()  # ponytail: avoids one repeat; Wwise-style full-cycle shuffle if it matters
+			_last_shuffle = idx
+			_play_node(p, kids[idx], done)
+		"playlist":
+			_play_seq(p, t.get("sounds", []), 0, t.get("playlist_loop", true), done)
+		"conditional":
+			var pick: Dictionary = _pick_branch(t)
+			if pick.is_empty():
+				push_warning("Audition: no matching branch")
+				done.call()
+			else:
+				_play_node(p, pick, done)
+		_:
+			push_warning("Audition: unknown trigger '%s'" % t.get("trigger", ""))
+			done.call()
+
+func _play_seq(p: AudioStreamPlayer, sounds: Array, i: int, loop: bool, done: Callable) -> void:
+	if i >= sounds.size():
+		if loop and not sounds.is_empty():
+			_play_seq(p, sounds, 0, true, done)  # ponytail: intentional infinite loop, Stop button is the guard
+		else:
+			done.call()
+		return
+	_play_node(p, sounds[i], func() -> void: _play_seq(p, sounds, i + 1, loop, done))
+
+func _play_leaf(p: AudioStreamPlayer, file: String, done: Callable) -> void:
+	if file.is_empty():
+		done.call()
+		return
+	var path := _audio_dir.path_join(file)
+	var stream: AudioStream = null
+	match path.get_extension():
+		"wav": stream = AudioStreamWAV.load_from_file(path)
+		"ogg": stream = AudioStreamOggVorbis.load_from_file(path)
+		"mp3": stream = AudioStreamMP3.load_from_file(path)
+	if stream == null:
+		push_warning("Audition: cannot load %s" % path)
+		done.call()
+		return
+	p.stream = stream
+	p.play()
+	p.finished.connect(done, CONNECT_ONE_SHOT)
+
+## First branch whose conditions all hold (using each variable's default value
+## as the current value); falls back to the branch marked default.
+func _pick_branch(t: Dictionary) -> Dictionary:
+	var branches: Array = t.get("branches", [])
+	var bcs: Array = t.get("branch_conditions", [])
+	var fallback := -1
+	for i in branches.size():
+		var bc: Dictionary = bcs[i] if i < bcs.size() else {"conditions": []}
+		if bc.get("default", false):
+			fallback = i
+		elif _conditions_ok(bc.get("conditions", [])):
+			return t["branches"][i]
+	if fallback != -1:
+		return t["branches"][fallback]
+	return {}
+
+func _conditions_ok(conds: Array) -> bool:
+	for cond: Dictionary in conds:
+		var param: String = cond.get("param", "")
+		var decl: Dictionary = _variables.get(param, {})
+		var cur = decl.get("default", "")
+		var want: String = str(cond.get("value", ""))
+		var op: String = cond.get("op", "==")
+		if decl.get("type", "enum") == "number" or String(cur).is_valid_float() and String(cur) != "":
+			var a := float(cur)
+			var b := float(want)
+			match op:
+				"==": if not (a == b): return false
+				"!=": if not (a != b): return false
+				"<": if not (a < b): return false
+				"<=": if not (a <= b): return false
+				">": if not (a > b): return false
+				">=": if not (a >= b): return false
+		else:
+			match op:
+				"==": if cur != want: return false
+				"!=": if cur == want: return false
+				_:
+					push_warning("Audition: op '%s' needs a numeric variable (%s)" % [op, param])
+					return false
+	return true
+
+## Create the event's bus (and its parents) in the live AudioServer, applying
+## project volumes. Existing buses are left alone.
+func _setup_bus(name: String, buses: Dictionary, bus_volumes: Dictionary) -> void:
+	if name.is_empty() or name == "Master" or AudioServer.get_bus_index(name) != -1:
+		return
+	_setup_bus(buses.get(name, ""), buses, bus_volumes)  # parents before children
+	var idx := AudioServer.bus_count
+	AudioServer.add_bus(idx)
+	AudioServer.set_bus_name(idx, name)
+	var parent: String = buses.get(name, "")
+	AudioServer.set_bus_send(idx, parent if not parent.is_empty() else "Master")
+	var v: float = bus_volumes.get(name, 100.0)
+	AudioServer.set_bus_volume_db(idx, linear_to_db(clampf(v / 100.0, 0.0001, 1.0)))
