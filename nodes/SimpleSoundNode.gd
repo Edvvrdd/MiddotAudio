@@ -38,5 +38,5 @@ func create_node(data: Dictionary, node_name: String, ctx: NodeCtx) -> GraphNode
 	file_edit.text_changed.connect(func(t: String) -> void: data["audio_file"] = t)
 	file_edit.custom_minimum_size = Vector2(160, 0)
 	sound.add_child(file_edit)
-	sound.set_slot(0, true, 0, Color.WHITE, false, 0, Color.WHITE)
+	sound.set_slot(0, true, 0, Color.WHITE, true, 0, Color.WHITE)
 	return sound

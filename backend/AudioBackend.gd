@@ -291,18 +291,30 @@ func compile_event(event_name: String) -> Dictionary:
 		push_error("Compile: event '%s' has no Event Output node -- skipped" % event_name)
 		return {}
 	# Root = the node that nothing feeds into (no wire targets it). The Output
-	# node carries event props only; the wire into it is optional decoration.
+	# node carries event props only. Sounds wired straight into Output are
+	# absorbed: one is a simple event, several are rejected (route them through
+	# a Trigger node -- Output plays nothing by itself).
 	var targeted := {}
+	var out_sounds: Array = []  # ids of sound nodes wired directly into Output
 	for w in c["wires"]:
 		if w["to"] != out["id"]:
 			targeted[w["to"]] = true
+		elif node_type(event_name, w["from"]) == "sound":
+			out_sounds.append(w["from"])
 	var roots: Array = []
 	for n in c["nodes"]:
-		if n["type"] in ["event_output", "variable"]:
+		if n["type"] in ["event_output", "variable"] or targeted.has(n["id"]):
 			continue
-		if not targeted.has(n["id"]):
-			roots.append(n["id"])
+		if n["type"] == "sound" and out_sounds.has(n["id"]):
+			continue  # absorbed into Output, never a root
+		roots.append(n["id"])
+	if roots.is_empty() and out_sounds.size() == 1:
+		roots.append(out_sounds[0])  # single sound -> simple event
 	if roots.is_empty():
+		if out_sounds.size() > 1:
+			push_error("Compile: event '%s' has %d sounds wired straight into Output -- route them through a Trigger node (Playlist/Random)" % [event_name, out_sounds.size()])
+			assert(false, "Compile: multiple sounds into Output")
+			return {}
 		push_error("Compile: event '%s' has no root node (wire your triggers together) -- skipped" % event_name)
 		assert(false, "Compile: no root trigger found")
 		return {}
