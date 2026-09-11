@@ -4,3 +4,5 @@
 .DS_Store
 AGENTS.md
 .mcp.json
+*.md
+!README.md
