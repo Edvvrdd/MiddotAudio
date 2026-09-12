@@ -11,20 +11,23 @@ var _project_path := ""
 ## events), and delta-undo across 20 mutating functions was the complex version.
 const UNDO_LIMIT := 50
 ## Backend notifications: refresh whatever the backend says changed.
+## Graph rebuilds are ALWAYS deferred: handlers here run inside graph-child
+## signal emissions (X buttons, sliders, dropdowns), and rebuilding frees
+## those nodes mid-signal = use-after-free crash. (Phase-two gotcha.)
 func _on_backend_changed(what: String) -> void:
 	match what:
 		"canvas":
 			if not _mixer_view and not _variables_view:
-				_build_graph()
+				_build_graph.call_deferred()
 		"events":
 			_refresh_events_list()
 		"variables":
 			if _variables_view:
 				_refresh_variables_list()
-				_build_variable_graph()
+				_build_variable_graph.call_deferred()
 		"buses":
 			if _mixer_view:
-				_build_bus_graph()
+				_build_bus_graph.call_deferred()
 		"all", "project":
 			if _auditioner:
 				_auditioner.stop()
@@ -32,11 +35,11 @@ func _on_backend_changed(what: String) -> void:
 			_refresh_assets_list()
 			if _variables_view:
 				_refresh_variables_list()
-				_build_variable_graph()
+				_build_variable_graph.call_deferred()
 			elif _mixer_view:
-				_build_bus_graph()
+				_build_bus_graph.call_deferred()
 			else:
-				_build_graph()
+				_build_graph.call_deferred()
 
 ## Call BEFORE any mutation that should be undoable.
 func _push_undo() -> void:
