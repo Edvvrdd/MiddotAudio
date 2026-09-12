@@ -3,7 +3,8 @@ extends ItemList
 
 ## Assets browser list: drag source for asset → sound node drops.
 ## The list mirrors the project's Audio folder (beside the .middot file);
-## to add assets, drop files into that folder — the app rescans on focus.
+## add assets by dropping audio files anywhere in the app window, or into
+## that folder directly (the app rescans on focus).
 
 func _get_drag_data(_at: Vector2):
 	var selected := get_selected_items()

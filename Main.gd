@@ -97,6 +97,7 @@ func _ready() -> void:
 		_on_rename_popup_confirmed()
 	)
 	events_list.item_activated.connect(_on_events_list_item_activated)
+	get_window().files_dropped.connect(_on_files_dropped)
 	%MixerList.item_selected.connect(_on_mixer_list_item_selected)
 	event_graph.connection_request.connect(_on_bus_connection_request)
 	event_graph.disconnection_request.connect(_on_bus_disconnection_request)
@@ -533,6 +534,39 @@ func _on_audition_pressed() -> void:
 		push_warning("Audition: event '%s' does not compile (see errors)" % _selected)
 		return
 	_auditioner.play(tree, _audio_dir(), backend.buses, backend.bus_volumes, backend.variables)
+
+## OS drag-and-drop import (Soundly/Explorer -> app window). Files are copied
+## into the project's Audio folder (the source of truth); dropping over the
+## event graph also spawns a Sound node at the cursor.
+func _on_files_dropped(files: PackedStringArray) -> void:
+	if _project_path.is_empty():
+		push_warning("Import: open or create a project first")
+		return
+	var imported: Array = []
+	for f in files:
+		var ext := f.get_extension().to_lower()
+		if not ext in ["wav", "ogg", "mp3"]:
+			push_warning("Import: skipped %s (not wav/ogg/mp3)" % f.get_file())
+			continue
+		var stem := f.get_file().get_basename()
+		var dest := _audio_dir().path_join(f.get_file())
+		var n := 2
+		while FileAccess.file_exists(dest):  # never overwrite; unique-name instead
+			dest = _audio_dir().path_join("%s-%d.%s" % [stem, n, ext])
+			n += 1
+		var err := DirAccess.copy_absolute(f, dest)
+		if err != OK:
+			push_error("Import: failed to copy %s (error %d)" % [f.get_file(), err])
+			continue
+		imported.append(dest.get_file())
+	_refresh_assets_list()
+	if imported.is_empty() or _selected.is_empty() or _mixer_view or _variables_view:
+		return
+	# dropped over the event graph: spawn a Sound node per file at the cursor
+	if not Rect2(Vector2.ZERO, event_graph.size).has_point(event_graph.get_local_mouse_position()):
+		return
+	for file in imported:
+		_on_graph_asset_dropped(file, event_graph.get_local_mouse_position())
 
 func _on_assets_list_item_activated(_index: int) -> void:
 	_open_rename_popup("asset")
