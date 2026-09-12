@@ -21,7 +21,7 @@ func push_undo() -> void:
 	main._push_undo()
 
 func rebuild_deferred() -> void:
-	main._rebuild_current_view()
+	main._rebuild_current_view.call_deferred()  # actually deferred: callers fire from node signals
 
 func rebuild_event_deferred() -> void:
 	main._build_graph.call_deferred()
