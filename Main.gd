@@ -694,7 +694,9 @@ func _on_rename_popup_confirmed() -> void:
 func _refresh_events_list() -> void:
 	var selected: Array = events_list.get_selected_items()
 	events_list.clear()
-	for event_name: String in backend.events:
+	# list mirrors canvases (the source of truth), NOT compiled events —
+	# an event that fails compile must stay visible and editable
+	for event_name: String in backend.canvas:
 		events_list.add_item(event_name)
 	for i: int in selected:
 		if i < events_list.item_count:
