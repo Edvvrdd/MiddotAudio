@@ -502,6 +502,16 @@ func from_dict(data: Dictionary) -> void:
 	bus_volumes = data.get("bus_volumes", {})
 	variables = data.get("variables", {})
 	canvas = data.get("graph", {})
+	# JSON turns ints into floats on load; coerce all ids back to int or every
+	# id comparison (delete_nodes' Array.has, wires, next_id) silently fails
+	for ev: String in canvas:
+		var c: Dictionary = canvas[ev]
+		for n in c["nodes"]:
+			n["id"] = int(n["id"])
+		for w in c["wires"]:
+			w["from"] = int(w["from"])
+			w["to"] = int(w["to"])
+		c["next_id"] = int(c.get("next_id", 0))
 	events = data.get("events", {})
 	if canvas.is_empty():
 		migrate_legacy()
