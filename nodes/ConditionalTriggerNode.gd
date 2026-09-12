@@ -48,13 +48,13 @@ func create_node(data: Dictionary, node_name: String, ctx: NodeCtx) -> GraphNode
 	node.add_child(type_opt)
 
 	if mode in ["playlist", "random"]:
-		# Playlist body: loop toggle + pins. Random body: shuffle picker + pins.
+		# Playlist body: sync toggle + pins. Random body: shuffle picker + pins.
 		if mode == "playlist":
-			var loop_check := CheckBox.new()
-			loop_check.text = "Loop"
-			loop_check.button_pressed = data.get("playlist_loop", true)
-			loop_check.toggled.connect(func(on: bool) -> void: data["playlist_loop"] = on)
-			node.add_child(loop_check)
+			var sync_check := CheckBox.new()
+			sync_check.text = "Sync (play all pins together)"
+			sync_check.button_pressed = data.get("sync", false)
+			sync_check.toggled.connect(func(on: bool) -> void: data["sync"] = on)
+			node.add_child(sync_check)
 		else:
 			var mode_opt := OptionButton.new()
 			mode_opt.add_item("Random")

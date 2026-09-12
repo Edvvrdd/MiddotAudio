@@ -41,11 +41,11 @@ func create_node(data: Dictionary, node_name: String, ctx: NodeCtx) -> GraphNode
 	var sub_node := GraphNode.new()
 	sub_node.name = node_name
 	sub_node.title = "Playlist Trigger"
-	var loop_check := CheckBox.new()
-	loop_check.text = "Loop"
-	loop_check.button_pressed = data.get("playlist_loop", true)
-	loop_check.toggled.connect(func(on: bool) -> void: data["playlist_loop"] = on)
-	sub_node.add_child(loop_check)
+	var sync_check := CheckBox.new()
+	sync_check.text = "Sync (play all pins together)"
+	sync_check.button_pressed = data.get("sync", false)
+	sync_check.toggled.connect(func(on: bool) -> void: data["sync"] = on)
+	sub_node.add_child(sync_check)
 	var add_pin := Button.new()
 	add_pin.text = "+ add pin"
 	add_pin.pressed.connect(func() -> void:

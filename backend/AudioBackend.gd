@@ -124,9 +124,9 @@ func default_data_for(type_name: String) -> Dictionary:
 		"random_trigger":
 			return {"random_mode": "shuffle", "pins": 1}
 		"playlist_trigger":
-			return {"playlist_loop": true, "pins": 1}
+			return {"sync": false, "playlist_loop": true, "pins": 1}
 		"conditional_trigger":
-			return {"mode": "playlist", "playlist_loop": true, "pins": 1}
+			return {"mode": "playlist", "playlist_loop": true, "sync": false, "pins": 1}
 		"event_output":
 			return {"bus": "Master", "volume": 100.0, "looping": false}
 	return {}
@@ -359,6 +359,8 @@ func _compile_node(id: int, c: Dictionary, event_name: String, visited: Dictiona
 			return {"trigger": "random", "random_mode": node["data"].get("random_mode", "random"),
 				"sounds": _compile_children(node, c, event_name, visited, depth, out_id)}
 		"playlist_trigger":
+			if node["data"].get("sync", false):
+				return {"trigger": "sync", "sounds": _compile_children(node, c, event_name, visited, depth, out_id)}
 			return {"trigger": "playlist", "playlist_loop": node["data"].get("playlist_loop", true),
 				"sounds": _compile_children(node, c, event_name, visited, depth, out_id)}
 		"conditional_trigger":
@@ -375,6 +377,8 @@ func _compile_node(id: int, c: Dictionary, event_name: String, visited: Dictiona
 					if not s.is_empty():
 						sounds.append(s)
 				if tmode == "playlist":
+					if node["data"].get("sync", false):
+						return {"trigger": "sync", "sounds": sounds}
 					return {"trigger": "playlist", "playlist_loop": node["data"].get("playlist_loop", true), "sounds": sounds}
 				return {"trigger": "random", "random_mode": node["data"].get("random_mode", "random"), "sounds": sounds}
 			var bcs: Array = node["data"].get("branch_conditions", [])
