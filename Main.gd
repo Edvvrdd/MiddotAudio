@@ -404,6 +404,30 @@ func save_project() -> void:
 	f.store_string(JSON.stringify(data, "\t"))
 	f.close()
 	print("Project saved: ", _project_path)
+	_dump_debug_state()  # DEBUG BRANCH: every save also dumps live state for the agent
+
+## DEBUG BRANCH ONLY. Writes the full in-memory session (unsaved changes
+## included) to a fixed path so an outside tool can read the live session.
+## F12 or any save. Not for merging to main.
+func _dump_debug_state() -> void:
+	var dump := {
+		"dumped_at": Time.get_datetime_string_from_system(),
+		"project_path": _project_path,
+		"selected_event": _selected,
+		"variables": backend.variables,
+		"buses": backend.buses,
+		"bus_volumes": backend.bus_volumes,
+		"events": backend.events,
+		"canvas": backend.canvas,
+	}
+	var path := OS.get_environment("TEMP").path_join("middot_dump.json")
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		push_error("Debug dump failed: cannot open %s" % path)
+		return
+	f.store_string(JSON.stringify(dump, "\t"))
+	f.close()
+	print("Debug dump written: ", path)
 
 func _load_project(path: String) -> void:
 	var parsed = JSON.parse_string(FileAccess.open(path, FileAccess.READ).get_as_text())
@@ -591,6 +615,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if event is InputEventKey and event.pressed and event.keycode == KEY_F5:
 		_on_audition_pressed()
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventKey and event.pressed and event.keycode == KEY_F12:
+		_dump_debug_state()
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and event.pressed and event.keycode == KEY_F2:
