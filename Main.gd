@@ -131,12 +131,14 @@ func _on_event_graph_gui_input(event: InputEvent, menu: PopupMenu) -> void:
 		menu.set_meta("spawn_pos", (event_graph.get_local_mouse_position() - Vector2(150, 20)).snapped(Vector2(10, 10)))
 		menu.popup()
 
-## Context menu: node types contribute their own actions (registry), plus
-## "New Variable" and existing-variable reuse entries.
-## Node actions are ungated — no "set trigger mode first" ceremony.
 ## Context menu (fixed, curated): Trigger, Sound, Variable, Looper, Output.
+## "Add Variable" gets a hover submenu: new variable + every declared one.
 func _rebuild_event_menu(menu: PopupMenu) -> void:
 	menu.clear()
+	for c in menu.get_children():
+		if c is PopupMenu:
+			menu.remove_child(c)
+			c.free()  # stale submenu from the last open
 	var items: Array = [
 		["Add Trigger", "conditional_trigger"],
 		["Add Sound", "sound"],
@@ -147,6 +149,26 @@ func _rebuild_event_menu(menu: PopupMenu) -> void:
 	for i in items.size():
 		menu.add_item(items[i][0], 1000 + i)
 		menu.set_item_metadata(menu.get_item_count() - 1, {"place_type": items[i][1]})
+	# "Add Variable" (id 1002) opens a submenu of declared variables when any exist
+	if not backend.variables.is_empty():
+		var sub := PopupMenu.new()
+		sub.name = "AddVariableSub"
+		sub.add_item("+ New Variable", 2000)
+		var var_id := 2001
+		for var_name: String in backend.variables:
+			sub.add_item(var_name, var_id)
+			var_id += 1
+		sub.id_pressed.connect(func(id: int) -> void:
+			if _selected.is_empty():
+				return
+			var pos: Vector2 = event_graph.get_meta("spawn_pos", Vector2(200, 100))
+			if id == 2000:
+				backend.add_variable_node(_selected, pos)
+				return
+			var sub_idx := sub.get_item_index(id)
+			backend.add_variable_node(_selected, pos, sub.get_item_text(sub_idx)))
+		menu.add_child(sub)
+		menu.set_item_submenu(_menu_index_for_id(menu, 1002), "AddVariableSub")
 
 func _on_event_menu_id_pressed(id: int, menu: PopupMenu) -> void:
 	var meta = menu.get_item_metadata(_menu_index_for_id(menu, id))

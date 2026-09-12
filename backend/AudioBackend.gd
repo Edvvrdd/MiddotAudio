@@ -131,18 +131,23 @@ func default_data_for(type_name: String) -> Dictionary:
 			return {"bus": "Master", "volume": 100.0, "looping": false}
 	return {}
 
-func add_variable_node(event_name: String, pos: Vector2) -> String:
+## Place a variable node. With `existing_param`, reference a declared variable
+## (no new registry entry); without, generate param_N and declare it.
+func add_variable_node(event_name: String, pos: Vector2, existing_param: String = "") -> String:
 	push_undo()
-	var name := "param_%d" % (variables.size() + 1)
-	while variables.has(name):
-		name += "_new"
-	variables[name] = {"type": "enum", "enum_values": [], "min": "", "max": "", "default": false}
+	var name := existing_param
+	if name.is_empty() or not variables.has(name):
+		name = "param_%d" % (variables.size() + 1)
+		while variables.has(name):
+			name += "_new"
+		variables[name] = {"type": "enum", "enum_values": [], "min": "", "max": "", "default": false}
 	ensure_canvas(event_name)
 	var c: Dictionary = canvas[event_name]
 	var id: int = c["next_id"]
 	c["next_id"] = id + 1
+	var decl: Dictionary = variables[name]
 	c["nodes"].append({"id": id, "type": "variable",
-		"data": {"param": name, "type": "enum", "enum_values": [], "min": "", "max": "", "default": false},
+		"data": {"param": name, "type": decl.get("type", "enum"), "enum_values": decl.get("enum_values", []), "min": decl.get("min", ""), "max": decl.get("max", ""), "default": decl.get("default", false)},
 		"pos": pos})
 	changed.emit("all")
 	return name
