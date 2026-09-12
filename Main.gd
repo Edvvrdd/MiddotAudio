@@ -497,6 +497,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and event.keycode == KEY_DELETE and not _mixer_view:
 		if _variables_view:
 			_delete_selected_variable()
+		elif %EventsPanel.visible and not events_list.get_selected_items().is_empty():
+			_delete_selected_event()
 		else:
 			_delete_selected_nodes()
 		get_viewport().set_input_as_handled()
@@ -753,6 +755,13 @@ func _on_node_close(node: Node) -> void:
 
 func _delete_canvas_node(id: int) -> void:
 	backend.delete_nodes(_selected, [id])
+
+## Del on the events list: remove the event (canvas + compiled tree).
+func _delete_selected_event() -> void:
+	var name: String = events_list.get_item_text(events_list.get_selected_items()[0])
+	backend.delete_event(name)
+	if _selected == name:
+		_selected = ""
 
 ## Persist live node positions into the canvas (called on drag end and before
 ## rebuilds) so nodes never teleport when the graph re-renders.

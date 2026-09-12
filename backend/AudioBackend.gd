@@ -255,6 +255,12 @@ func create_event(event_name: String) -> void:
 	events[event_name] = {}
 	changed.emit("events")
 
+func delete_event(event_name: String) -> void:
+	push_undo()
+	canvas.erase(event_name)
+	events.erase(event_name)
+	changed.emit("all")
+
 func rename_event(old_name: String, new_name: String) -> bool:
 	if not events.has(old_name) or new_name.is_empty() or new_name == old_name:
 		return false
