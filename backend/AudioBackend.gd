@@ -245,12 +245,21 @@ func sync_declaration(cond: Dictionary, old_param: String = "") -> void:
 func delete_variable(name: String) -> void:
 	push_undo()
 	variables.erase(name)
+	# purge EVERY usage: condition references AND variable nodes themselves
+	# (previously nodes were left orphaned, pointing at a deleted declaration)
 	for event_name: String in canvas:
-		for n in canvas[event_name]["nodes"]:
-			for bc in n["data"].get("branch_conditions", []):
-				bc["conditions"] = (bc.get("conditions", []) as Array).filter(func(c):
-					return c.get("param", "") != name)
-	changed.emit("variables")
+		var c: Dictionary = canvas[event_name]
+		var dead: Array = []
+		for n in c["nodes"]:
+			if n["type"] == "variable" and n["data"].get("param", "") == name:
+				dead.append(n["id"])
+			else:
+				for bc in n["data"].get("branch_conditions", []):
+					bc["conditions"] = (bc.get("conditions", []) as Array).filter(func(c):
+						return c.get("param", "") != name)
+		c["nodes"] = c["nodes"].filter(func(n): return not dead.has(n["id"]))
+		c["wires"] = c["wires"].filter(func(w): return not (dead.has(w["from"]) or dead.has(w["to"])))
+	changed.emit("all")
 
 ## ---- events (list-level) ----------------------------------------------------
 
