@@ -42,16 +42,35 @@ func create_node(data: Dictionary, node_name: String, ctx: NodeCtx) -> GraphNode
 	vol.min_value = 0.0
 	vol.max_value = 100.0
 	vol.value = data.get("volume", 100.0)
-	vol.custom_minimum_size = Vector2(160, 0)
-	vol.value_changed.connect(func(v: float) -> void: data["volume"] = v)
-	sound.add_child(vol)
+	vol.custom_minimum_size = Vector2(120, 0)
+	var vol_val := Label.new()
+	vol_val.text = "%d" % int(vol.value)
+	vol.value_changed.connect(func(v: float) -> void:
+		data["volume"] = v
+		vol_val.text = "%d" % int(v))
+	sound.add_child(_slider_row("Vol", vol, vol_val))
 	var pitch := HSlider.new()
 	pitch.min_value = 0.1
 	pitch.max_value = 4.0
 	pitch.step = 0.05
 	pitch.value = data.get("pitch", 1.0)
-	pitch.custom_minimum_size = Vector2(160, 0)
-	pitch.value_changed.connect(func(v: float) -> void: data["pitch"] = v)
-	sound.add_child(pitch)
+	pitch.custom_minimum_size = Vector2(120, 0)
+	var pitch_val := Label.new()
+	pitch_val.text = "%.2f×" % pitch.value
+	pitch.value_changed.connect(func(v: float) -> void:
+		data["pitch"] = v
+		pitch_val.text = "%.2f×" % v)
+	sound.add_child(_slider_row("Pitch", pitch, pitch_val))
+	# wires attach to row 0 (the file row); slider rows carry no slots
 	sound.set_slot(0, true, 0, Color.WHITE, true, 0, Color.WHITE)
 	return sound
+
+## Label + slider + live value label in one row.
+static func _slider_row(label_text: String, slider: HSlider, value_label: Label) -> HBoxContainer:
+	var name_label := Label.new()
+	name_label.text = label_text
+	var row := HBoxContainer.new()
+	row.add_child(name_label)
+	row.add_child(slider)
+	row.add_child(value_label)
+	return row
