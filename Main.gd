@@ -88,8 +88,14 @@ func _ready() -> void:
 	%AddVariableButton.pressed.connect(_on_new_variable_button_pressed)
 	%PlaceholderTabButton.text = "Mixer"
 	project_dialog.file_selected.connect(_on_project_dialog_file_selected)
-	%MenuBar.project_dialog_requested.connect(_open_project_dialog)
+	project_dialog.canceled.connect(_enter_temp_mode)
+	%MenuBar.new_project_requested.connect(_open_new_project_dialog)
+	%MenuBar.open_project_requested.connect(_open_project_dialog)
+	%MenuBar.save_requested.connect(save_project)
+	%MenuBar.save_as_requested.connect(_open_save_dialog)
+	%MenuBar.export_requested.connect(_on_export_button_pressed)
 	_run_boot_sequence()
+	_update_title()
 	%AssetsList.item_activated.connect(_on_assets_list_item_activated)
 	%RenamePopup.confirmed.connect(_on_rename_popup_confirmed)
 	%RenameField.text_submitted.connect(func(_t: String) -> void:
@@ -308,41 +314,87 @@ func _apply_theme_overrides() -> void:
 		sl.add_theme_stylebox_override("grabber_area", grab_sb)
 		sl.add_theme_stylebox_override("grabber_area_highlight", grab_sb)
 
-## Boot sequence: the app refuses to edit until a project exists.
-## The dialog is in SAVE_FILE mode: type a NEW filename to create a project,
-## or select an existing .middot to open it.
+## Boot sequence: Open dialog — pick a .middot, or Cancel to work in a
+## temporary project (saved to a safe place only when you Save/Save As).
 func _run_boot_sequence() -> void:
-	project_dialog.title = "New project (type a name) or open existing (.middot)"
 	_open_project_dialog()
 
 func _open_project_dialog() -> void:
-	project_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
-	project_dialog.filters = ["*.middot"]
-	project_dialog.current_file = _project_path.get_file() if not _project_path.is_empty() else "new_project.middot"
+	project_dialog.title = "Open project (.middot) — Cancel to work in a temporary project"
+	project_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	project_dialog.popup_centered()
 
-## File > Save As: re-opens the project dialog; picking a path re-points the
-## project and saves immediately.
-func _on_save_as_pressed() -> void:
-	_open_project_dialog()
+func _open_new_project_dialog() -> void:
+	project_dialog.title = "New project (.middot)"
+	project_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	project_dialog.current_file = "untitled.middot"
+	project_dialog.popup_centered()
+
+func _open_save_dialog() -> void:
+	project_dialog.title = "Save project as (.middot)"
+	project_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	project_dialog.current_file = _project_path.get_file() if not _project_path.is_empty() else "untitled.middot"
+	project_dialog.popup_centered()
+
+## Canceling the dialog: enter temp mode (first cancel) or keep the session.
+func _enter_temp_mode() -> void:
+	if not _project_path.is_empty():
+		return  # canceling Save As on a real project: keep it as is
+	if not backend.canvas.is_empty():
+		return  # already working on a (temp) session
+	backend.new_project()
+	_update_title()
+	_refresh_assets_list()
+
+## First Save As from temp mode: bring the temp Audio folder along, then
+## clean the temp dir so the next temp session starts empty.
+func _migrate_temp_audio() -> void:
+	var src := _temp_audio_dir()
+	if not DirAccess.dir_exists_absolute(src):
+		return
+	DirAccess.make_dir_recursive_absolute(_audio_dir())  # fresh projects have no Audio yet
+	var sdir := DirAccess.open(src)
+	if sdir == null:
+		return
+	for f in sdir.get_files():
+		DirAccess.copy_absolute(src.path_join(f), _audio_dir().path_join(f))
+		DirAccess.remove_absolute(src.path_join(f))
+
+func _temp_audio_dir() -> String:
+	return OS.get_environment("TEMP").path_join("MiddotWare_Temp").path_join("Audio")
+
+func _update_title() -> void:
+	get_window().title = "MiddotWare — %s" % (_project_path.get_file() if not _project_path.is_empty() else "(unsaved)")
 
 func _on_project_dialog_file_selected(path: String) -> void:
+	if project_dialog.file_mode == FileDialog.FILE_MODE_OPEN_FILE:
+		# Open: load it (overwriting a project is only done via Save As,
+		# where Godot's built-in confirm runs first)
+		_selected = ""
+		_project_path = path
+		_load_project(path)
+		_update_title()
+		return
+	# SAVE_FILE mode (New Project / Save As): Godot already confirmed overwrite
 	if not path.ends_with(".middot"):
 		path += ".middot"
+	var was_temp := _project_path.is_empty()
 	_project_path = path
-	if FileAccess.file_exists(path):
-		_load_project(path)
+	if was_temp:
+		_migrate_temp_audio()
+	save_project()
+	_update_title()
 	_refresh_events_list()
 	_refresh_assets_list()
 	_refresh_mixer_list()
 	backend.enable_undo()
-	save_project()  # new projects are written immediately; existing get re-persisted
 
 ## Project save/load: JSON under a .middot extension (ResourceSaver only
 ## accepts known extensions like .tres, so raw JSON is the lazy path).
 ## FMOD-style project file, self-contained next to its audio.
 func save_project() -> void:
 	if _project_path.is_empty():
+		_open_save_dialog()  # temp mode: saving means Save As
 		return
 	var data: Dictionary = backend.to_dict()
 	var f := FileAccess.open(_project_path, FileAccess.WRITE)
@@ -363,8 +415,11 @@ func _load_project(path: String) -> void:
 
 
 
-## The project's Audio folder lives beside the .middot file.
+## The project's Audio folder lives beside the .middot file; a temporary
+## (unsaved) project keeps its Audio in %TEMP%\MiddotWare_Temp until first save.
 func _audio_dir() -> String:
+	if _project_path.is_empty():
+		return _temp_audio_dir()
 	return _project_path.get_base_dir().path_join("Audio")
 
 ## Clicking the bank: the right pane becomes the bus-routing graph.
@@ -490,18 +545,16 @@ var _selected_variable := ""  # param name of the variable shown in Variables ta
 func _notification(what: int) -> void:
 	if not is_inside_tree():
 		return
-	if not _project_path.is_empty():
-		match what:
-			NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_WM_WINDOW_FOCUS_IN:
-				_refresh_assets_list()
+	match what:
+		NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_WM_WINDOW_FOCUS_IN:
+			_refresh_assets_list()
 
-## Scan the project's Audio folder (beside the .middot file) for audio files
-## and mirror it into the assets list. Single source of truth = the folder.
+## Scan the project's Audio folder (beside the .middot file — or the temp dir
+## for unsaved projects) and mirror it into the assets list. Single source of
+## truth = the folder.
 func _refresh_assets_list() -> void:
 	%AssetsList.clear()
-	if _project_path.is_empty():
-		return
-	var audio_dir: String = _project_path.get_base_dir().path_join("Audio")
+	var audio_dir: String = _audio_dir()
 	DirAccess.make_dir_recursive_absolute(audio_dir)
 	var dir := DirAccess.open(audio_dir)
 	if dir == null:
@@ -563,9 +616,7 @@ func _on_audition_pressed() -> void:
 ## into the project's Audio folder (the source of truth); dropping over the
 ## event graph also spawns a Sound node at the cursor.
 func _on_files_dropped(files: PackedStringArray) -> void:
-	if _project_path.is_empty():
-		push_warning("Import: open or create a project first")
-		return
+	DirAccess.make_dir_recursive_absolute(_audio_dir())  # temp mode included
 	var imported: Array = []
 	for f in files:
 		var ext := f.get_extension().to_lower()
@@ -949,7 +1000,8 @@ func _on_bus_disconnection_request(from: StringName, _from_port: int, to: String
 		_build_bus_graph()
 
 func _on_export_button_pressed() -> void:
-	save_project()  # durability first: authoring state always persists on export
+	if not _project_path.is_empty():
+		save_project()  # durability first: authoring state always persists on export
 	file_dialog.popup_centered()
 
 func _on_file_dialog_file_selected(path: String) -> void:
