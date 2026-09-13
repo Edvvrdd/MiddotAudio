@@ -1,3 +1,6 @@
+# Agent working notes (local only, not pushed)
+Agents/
+
 # Godot 4+ specific ignores
 .godot/
 /android/
