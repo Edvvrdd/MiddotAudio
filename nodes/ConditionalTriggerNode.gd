@@ -11,15 +11,6 @@ const ACCENT3 := Color("e8b84b")
 func type_name() -> String:
 	return "conditional_trigger"
 
-func display_name() -> String:
-	return "Trigger"
-
-func can_be_root() -> bool:
-	return true
-
-func is_container() -> bool:
-	return true
-
 func connect_rules() -> Dictionary:
 	return {"in": [], "out": ["sound", "random_trigger", "playlist_trigger", "conditional_trigger"]}
 
@@ -43,7 +34,6 @@ func create_node(data: Dictionary, node_name: String, ctx: NodeCtx) -> GraphNode
 	type_opt.select(maxi(["playlist", "random", "conditional"].find(mode), 0))
 	type_opt.item_selected.connect(func(idx: int) -> void:
 		data["mode"] = ["playlist", "random", "conditional"][idx]
-		print("MODE_HANDLER data=", data.get("mode"), " same_ref=", data == data)
 		ctx.rebuild_deferred())
 	node.add_child(type_opt)
 

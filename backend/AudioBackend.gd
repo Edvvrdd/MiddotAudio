@@ -54,7 +54,6 @@ func _snapshot() -> Dictionary:
 		"variables": variables.duplicate(true),
 		"buses": buses.duplicate(true),
 		"bus_volumes": bus_volumes.duplicate(true),
-		"selected": "",
 	}
 
 func _restore(snap: Dictionary) -> void:

@@ -5,18 +5,6 @@ extends NodeType
 func type_name() -> String:
 	return "sound"
 
-func display_name() -> String:
-	return "Sound"
-
-func can_be_root() -> bool:
-	return true
-
-func is_container() -> bool:
-	return false
-
-func menu_actions(_ctx: NodeCtx) -> Array:
-	return []
-
 func connect_rules() -> Dictionary:
 	return {"in": ["random_trigger", "playlist_trigger", "conditional_trigger"], "out": ["event_output"]}
 

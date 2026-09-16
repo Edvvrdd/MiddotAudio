@@ -1,31 +1,9 @@
 extends NodeType
 
-## Playlist trigger (sequential, loops). Data: {trigger: "playlist",
-## playlist_loop, sounds: [file-or-node...]}
+## Playlist trigger (sequential, loops). Data: {sync, playlist_loop, pins}
 
 func type_name() -> String:
 	return "playlist_trigger"
-
-func display_name() -> String:
-	return "Playlist Trigger"
-
-func can_be_root() -> bool:
-	return true
-
-func is_container() -> bool:
-	return true
-
-func menu_actions(_ctx: NodeCtx) -> Array:
-	return [{"label": "Add Playlist Trigger", "id": 11, "enabled": true}]
-
-func run_action(_id: int, ctx: NodeCtx) -> void:
-	var e: Dictionary = ctx.selected_event()
-	if e.is_empty():
-		return
-	ctx.push_undo()
-	# pure append: no promotion, no mutation of existing content
-	e.get_or_add("sounds", []).append({"trigger": "playlist", "playlist_loop": true, "sounds": []})
-	ctx.rebuild_event_deferred()
 
 func connect_rules() -> Dictionary:
 	return {"in": ["conditional_trigger"], "out": ["sound", "random_trigger", "playlist_trigger", "conditional_trigger"]}

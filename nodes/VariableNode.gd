@@ -7,12 +7,6 @@ extends NodeType
 func type_name() -> String:
 	return "variable"
 
-func display_name() -> String:
-	return "Variable"
-
-func is_container() -> bool:
-	return false
-
 func connect_rules() -> Dictionary:
 	return {"in": [], "out": []}
 

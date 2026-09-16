@@ -6,12 +6,6 @@ extends NodeType
 func type_name() -> String:
 	return "event_output"
 
-func display_name() -> String:
-	return "Event Output"
-
-func is_container() -> bool:
-	return false
-
 func connect_rules() -> Dictionary:
 	return {"in": ["random_trigger", "playlist_trigger", "conditional_trigger", "sound"], "out": []}
 

@@ -3,13 +3,8 @@ extends Control
 var _new_event_counter := 0
 var _selected := ""
 var _rename_target := "asset"
-var _pending_drop_pos := Vector2.INF
 var _project_path := ""
 
-## Undo/redo: snapshots of the full authoring state (events, buses, volumes).
-## ponytail: whole-state snapshots, not deltas — the state is small (tens of
-## events), and delta-undo across 20 mutating functions was the complex version.
-const UNDO_LIMIT := 50
 ## Backend notifications: refresh whatever the backend says changed.
 ## Graph rebuilds are ALWAYS deferred: handlers here run inside graph-child
 ## signal emissions (X buttons, sliders, dropdowns), and rebuilding frees
@@ -77,6 +72,7 @@ func _ready() -> void:
 	event_graph.asset_dropped.connect(_on_graph_asset_dropped)
 	event_graph.node_selected.connect(_on_node_selected)
 	event_graph.node_deselected.connect(_on_node_deselected)
+	event_graph.delete_nodes_request.connect(_on_delete_nodes_request)
 	event_graph.end_node_move.connect(_save_positions)
 	%EventsTabButton.pressed.connect(_on_left_tab_pressed.bind("events"))
 	%AssetsTabButton.pressed.connect(_on_left_tab_pressed.bind("assets"))
@@ -86,7 +82,6 @@ func _ready() -> void:
 	%VariablesList.item_selected.connect(_on_variables_list_item_selected)
 	%VariablesList.item_activated.connect(_on_variables_list_item_activated)
 	%AddVariableButton.pressed.connect(_on_new_variable_button_pressed)
-	%PlaceholderTabButton.text = "Mixer"
 	project_dialog.file_selected.connect(_on_project_dialog_file_selected)
 	project_dialog.canceled.connect(_enter_temp_mode)
 	%MenuBar.new_project_requested.connect(_open_new_project_dialog)
@@ -134,7 +129,7 @@ func _on_event_graph_gui_input(event: InputEvent, menu: PopupMenu) -> void:
 	if not _mixer_view and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
 		_rebuild_event_menu(menu)
 		menu.position = get_viewport().get_mouse_position()
-		menu.set_meta("spawn_pos", (event_graph.get_local_mouse_position() - Vector2(150, 20)).snapped(Vector2(10, 10)))
+		event_graph.set_meta("spawn_pos", _graph_spawn_pos())
 		menu.popup()
 
 ## Context menu (fixed, curated): Trigger, Sound, Variable, Looper, Output.
@@ -196,6 +191,12 @@ func _on_node_selected(node: Node) -> void:
 
 func _on_node_deselected(node: Node) -> void:
 	_selected_node_names.erase(String(node.name))
+
+## GraphEdit consumes Del itself (ui_graph_delete) and asks us to delete.
+func _on_delete_nodes_request(nodes: Array) -> void:
+	if _selected.is_empty() or _mixer_view or _variables_view:
+		return
+	backend.delete_nodes(_selected, nodes.map(func(n): return _id_from_name(String(n))))
 
 func _on_graph_connection_request(from: StringName, from_port: int, to: StringName, to_port: int) -> void:
 	backend.connect_nodes(_selected, _id_from_name(String(from)), from_port, _id_from_name(String(to)), to_port)
@@ -301,9 +302,7 @@ func _apply_theme_overrides() -> void:
 	for le: LineEdit in find_children("*", "LineEdit", true, false):
 		le.add_theme_color_override("font_color", FG_TEXT)
 		le.add_theme_color_override("caret_color", ACCENT)
-		var lesb := _flat_style(BG_CONTROL, Color("3a4159"), 6)
-		le.add_theme_stylebox_override("normal", lesb)
-		le.add_theme_color_override("font_color", FG_TEXT)
+		le.add_theme_stylebox_override("normal", _flat_style(BG_CONTROL, Color("3a4159"), 6))
 	for ob: OptionButton in find_children("*", "OptionButton", true, false):
 		ob.add_theme_stylebox_override("normal", btn)
 		ob.add_theme_stylebox_override("hover", btn_hover)
@@ -473,19 +472,6 @@ func _rebuild_current_view() -> void:
 		_build_graph()
 
 ## Variables tab: the graph shows ONLY the selected variable's node.
-## Route file collection through the node-type registry by shape.
-func _collect_files_typed(node: Dictionary, files: Array) -> void:
-	var type_name: String = "sound"
-	if node.has("branches"):
-		type_name = "conditional_trigger"
-	elif node.get("trigger") == "playlist":
-		type_name = "playlist_trigger"
-	elif node.get("trigger") == "random":
-		type_name = "random_trigger"
-	var t: NodeType = NodeTypes.by_name(type_name)
-	if t:
-		t.collect_files(node, files)
-
 func _build_variable_graph() -> void:
 	for c in event_graph.get_children():
 		if c is GraphElement:
@@ -569,13 +555,13 @@ func _refresh_assets_list() -> void:
 
 ## F2 or double-click on a list: open rename popup pre-filled with current name.
 func _unhandled_key_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and event.keycode == KEY_DELETE and not _mixer_view:
-		if _variables_view:
+	if event is InputEventKey and event.pressed and (event.keycode == KEY_DELETE or event.keycode == KEY_BACKSPACE) and not _mixer_view:
+		if not _selected_node_names.is_empty() and not _variables_view:
+			_delete_selected_nodes()
+		elif _variables_view:
 			_delete_selected_variable()
 		elif %EventsPanel.visible and not events_list.get_selected_items().is_empty():
 			_delete_selected_event()
-		else:
-			_delete_selected_nodes()
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and event.pressed and event.keycode == KEY_S and event.ctrl_pressed:
@@ -777,6 +763,10 @@ var _node_names: Array = []
 var _selected_node_names: Array = []
 
 
+## Graph-space position of the mouse (local + scroll, zoom-corrected), snapped.
+func _graph_spawn_pos() -> Vector2:
+	return ((event_graph.get_local_mouse_position() + event_graph.scroll_offset) / event_graph.zoom).snapped(Vector2(10, 10))
+
 func _place_node(type_name: String) -> void:
 	if _selected.is_empty():
 		return
@@ -798,6 +788,7 @@ func _build_graph() -> void:
 			event_graph.remove_child(c)
 			c.free()
 	_node_names.clear()
+	_selected_node_names.clear()  # stale ids from the previous canvas would delete wrong nodes
 	if _selected.is_empty():
 		return
 	backend.ensure_canvas(_selected)
@@ -827,9 +818,6 @@ func _on_node_close(node: Node) -> void:
 		_selected_variable = ""
 		return
 	backend.delete_nodes(_selected, [_id_from_name(String(node.name))])
-
-func _delete_canvas_node(id: int) -> void:
-	backend.delete_nodes(_selected, [id])
 
 ## Del on the events list: remove the event (canvas + compiled tree).
 func _delete_selected_event() -> void:
@@ -1013,7 +1001,7 @@ func _on_file_dialog_file_selected(path: String) -> void:
 	var bank: Resource = load("res://addons/middot_audio/SoundBank.gd").new()
 	for event_props: Dictionary in backend.events.values():
 		var files: Array = []
-		_collect_files_typed(event_props, files)
+		NodeTypes.collect_files_dispatch(event_props, files)
 		for audio_file: String in files:
 			if audio_file.is_empty():
 				continue
@@ -1025,7 +1013,6 @@ func _on_file_dialog_file_selected(path: String) -> void:
 			if copy_err != OK:
 				push_error("Failed to copy %s: error code %d" % [audio_file, copy_err])
 				return
-
 	bank.events = backend.events.duplicate(true)
 	bank.buses = backend.buses.duplicate(true)
 	bank.bus_volumes = backend.bus_volumes.duplicate(true)

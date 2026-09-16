@@ -1,35 +1,9 @@
 extends NodeType
 
-## Random trigger (pure or shuffle). Data: {trigger: "random", random_mode,
-## sounds: [file-or-node...]}
-## Menu: "Add Random Trigger" — places a new Random sub-trigger wherever the
-## canvas allows it; not gated on any existing node.
+## Random trigger (pure or shuffle). Data: {random_mode, pins}
 
 func type_name() -> String:
 	return "random_trigger"
-
-func display_name() -> String:
-	return "Random Trigger"
-
-func can_be_root() -> bool:
-	return true
-
-func is_container() -> bool:
-	return true
-
-func menu_actions(_ctx: NodeCtx) -> Array:
-	return [{"label": "Add Random Trigger", "id": 10, "enabled": true}]
-
-func run_action(_id: int, ctx: NodeCtx) -> void:
-	var e: Dictionary = ctx.selected_event()
-	if e.is_empty():
-		return
-	ctx.push_undo()
-	# pure append: a new empty node, no mutation of existing content, no
-	# auto-wiring. User wires it and sets trigger modes themselves.
-	e.get_or_add("sounds", []).append({"trigger": "random", "random_mode": "shuffle", "sounds": []})
-	ctx.set_spawn_pos(ctx.spawn_pos())
-	ctx.rebuild_event_deferred()
 
 func connect_rules() -> Dictionary:
 	return {"in": ["conditional_trigger"], "out": ["sound", "random_trigger", "playlist_trigger", "conditional_trigger"]}

@@ -14,14 +14,6 @@ var _last_shuffle := -1
 var _tree := {}
 var _base_db := 0.0
 
-func is_playing() -> bool:
-	if _p != null and _p.playing:
-		return true
-	for v in _voices:
-		if is_instance_valid(v) and v.playing:
-			return true
-	return false
-
 func stop() -> void:
 	if _p:
 		_p.queue_free()
