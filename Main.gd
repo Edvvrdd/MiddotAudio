@@ -49,10 +49,11 @@ func redo() -> void:
 @onready var file_dialog: FileDialog = $FileDialog
 @onready var project_dialog: FileDialog = $ProjectDialog
 @onready var events_list: ItemList = %EventsList
-@onready var export_button: Button = %ExportButton
 @onready var event_graph: GraphEdit = %EventGraph
+@onready var _console_log: RichTextLabel = %ConsoleLog
 
 var _node_ctx: NodeCtx
+var _import_dialog: FileDialog
 var _auditioner: Auditioner
 
 var backend: AudioBackend
@@ -60,13 +61,19 @@ var backend: AudioBackend
 func _ready() -> void:
 	backend = AudioBackend.new()
 	backend.changed.connect(_on_backend_changed)
+	backend.logged.connect(_log)
 	backend.enable_undo()
 	_node_ctx = NodeCtx.new()
 	_node_ctx.main = self
 	%AddEventButton.pressed.connect(_on_add_event_button_pressed)
-	export_button.pressed.connect(_on_export_button_pressed)
+	%AddBusButton.pressed.connect(_add_bus_at_cursor)
+	%AddBankButton.pressed.connect(_on_add_bank_button_pressed)
+	%ImportSoundsButton.pressed.connect(func() -> void: _import_dialog.popup_centered())
+	%BanksTree.item_activated.connect(_on_banks_tree_activated)
+	%BanksTree.item_selected.connect(_on_bank_selected)
 	file_dialog.file_selected.connect(_on_file_dialog_file_selected)
 	events_list.item_selected.connect(_on_events_list_item_selected)
+	project_dialog.file_selected.connect(_on_project_dialog_file_selected)
 	event_graph.connection_request.connect(_on_graph_connection_request)
 	event_graph.disconnection_request.connect(_on_graph_disconnection_request)
 	event_graph.asset_dropped.connect(_on_graph_asset_dropped)
@@ -79,6 +86,7 @@ func _ready() -> void:
 	%PlaceholderTabButton.pressed.connect(_on_left_tab_pressed.bind("mixer"))
 	%PlaceholderTabButton.text = "Mixer"
 	%VariablesTabButton.pressed.connect(_on_left_tab_pressed.bind("variables"))
+	%BanksTabButton.pressed.connect(_on_left_tab_pressed.bind("banks"))
 	%VariablesList.item_selected.connect(_on_variables_list_item_selected)
 	%VariablesList.item_activated.connect(_on_variables_list_item_activated)
 	%AddVariableButton.pressed.connect(_on_new_variable_button_pressed)
@@ -89,6 +97,7 @@ func _ready() -> void:
 	%MenuBar.save_requested.connect(save_project)
 	%MenuBar.save_as_requested.connect(_open_save_dialog)
 	%MenuBar.export_requested.connect(_on_export_button_pressed)
+	%MenuBar.play_toggled.connect(_on_play_toggled)
 	_run_boot_sequence()
 	_update_title()
 	%AssetsList.item_activated.connect(_on_assets_list_item_activated)
@@ -103,10 +112,16 @@ func _ready() -> void:
 	event_graph.connection_request.connect(_on_bus_connection_request)
 	event_graph.disconnection_request.connect(_on_bus_disconnection_request)
 	_apply_theme_overrides()
+	_import_dialog = FileDialog.new()
+	_import_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_import_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILES
+	_import_dialog.filters = ["*.wav ; WAV audio", "*.ogg ; Ogg Vorbis", "*.mp3 ; MP3 audio"]
+	_import_dialog.files_selected.connect(_import_files)
+	add_child(_import_dialog)
 	_auditioner = Auditioner.new()
 	add_child(_auditioner)
-	%AuditionButton.pressed.connect(_on_audition_pressed)
-	%AuditionStopButton.pressed.connect(func() -> void: _auditioner.stop())
+	_auditioner.log_fn = _log
+	_auditioner.playing_changed.connect(%MenuBar.set_playing)
 	var bus_menu := PopupMenu.new()
 	bus_menu.name = "BusContextMenu"
 	bus_menu.add_item("Add Bus", 0)
@@ -296,6 +311,11 @@ func _apply_theme_overrides() -> void:
 		cursb.set_corner_radius_all(6)
 		il.add_theme_stylebox_override("selected_focus", cursb)
 		il.add_theme_stylebox_override("selected", cursb)
+	for t: Tree in find_children("*", "Tree", true, false):
+		var tree_sb := _flat_style(BG_PANEL, Color("2a2f42"), 10)
+		t.add_theme_stylebox_override("panel", tree_sb)
+		t.add_theme_color_override("font_color", FG_TEXT)
+		t.add_theme_color_override("font_hover_color", ACCENT)
 	for ge: GraphEdit in find_children("*", "GraphEdit", true, false):
 		var grid_sb := _flat_style(Color("0d0f16"), Color("2a2f42"), 10)
 		ge.add_theme_stylebox_override("panel", grid_sb)
@@ -398,16 +418,16 @@ func save_project() -> void:
 	var data: Dictionary = backend.to_dict()
 	var f := FileAccess.open(_project_path, FileAccess.WRITE)
 	if f == null:
-		push_error("Project save failed: cannot open ", _project_path)
+		_log("Project save failed: cannot open " + _project_path, "error")
 		return
 	f.store_string(JSON.stringify(data, "\t"))
 	f.close()
-	print("Project saved: ", _project_path)
+	_log("Project saved: " + _project_path)
 
 func _load_project(path: String) -> void:
 	var parsed = JSON.parse_string(FileAccess.open(path, FileAccess.READ).get_as_text())
 	if typeof(parsed) != TYPE_DICTIONARY or parsed.get("format_version") != 2:
-		push_error("Invalid or unsupported project file: ", path)
+		_log("Invalid or unsupported project file: " + path, "error")
 		return
 	backend.from_dict(parsed)
 
@@ -432,13 +452,17 @@ func _on_left_tab_pressed(tab: String) -> void:
 	%AssetsTabButton.button_pressed = tab == "assets"
 	%PlaceholderTabButton.button_pressed = tab == "mixer"
 	%VariablesTabButton.button_pressed = tab == "variables"
+	%BanksTabButton.button_pressed = tab == "banks"
 	%EventsPanel.visible = tab == "events"
 	%AssetsPanel.visible = tab == "assets"
 	%MixerPanel.visible = tab == "mixer"
 	%VariablesPanel.visible = tab == "variables"
+	%BanksPanel.visible = tab == "banks"
 	_mixer_view = tab == "mixer"
 	_variables_view = tab == "variables"
-	if _mixer_view:
+	if tab == "banks":
+		_build_banks_tree()
+	elif _mixer_view:
 		_build_bus_graph()
 	elif _variables_view:
 		_refresh_variables_list()
@@ -575,8 +599,23 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			undo()
 		get_viewport().set_input_as_handled()
 		return
+	# F5 toggles audition play/stop via the Transport menu; F7 exports.
 	if event is InputEventKey and event.pressed and event.keycode == KEY_F5:
-		_on_audition_pressed()
+		%MenuBar.toggle_play()
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventKey and event.pressed and event.keycode == KEY_F7:
+		_on_export_button_pressed()
+		get_viewport().set_input_as_handled()
+		return
+	# F11 toggles fullscreen; Esc leaves it (fullscreen hides the title bar).
+	if event is InputEventKey and event.pressed and event.keycode == KEY_F11:
+		var win := get_window()
+		win.mode = Window.MODE_WINDOWED if win.mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE and get_window().mode == Window.MODE_FULLSCREEN:
+		get_window().mode = Window.MODE_WINDOWED
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and event.pressed and event.keycode == KEY_F2:
@@ -584,30 +623,41 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_open_rename_popup("asset")
 		elif %EventsPanel.visible and not events_list.get_selected_items().is_empty():
 			_open_rename_popup("event")
+		elif %BanksPanel.visible and %BanksTree.get_selected() != null:
+			_open_rename_popup("bank")
 
 ## Audition (F5): play the selected event's compiled tree in-app.
-func _on_audition_pressed() -> void:
+func _on_play_toggled(playing: bool) -> void:
+	if not playing:
+		_auditioner.stop()
+		return
 	if _mixer_view or _variables_view:
+		%MenuBar.set_playing(false)
 		return
 	if _selected.is_empty():
-		push_warning("Audition: select an event first")
+		_log("Audition: select an event first", "warn")
+		%MenuBar.set_playing(false)
 		return
 	var tree: Dictionary = backend.compile_event(_selected)
 	if tree.is_empty():
-		push_warning("Audition: event '%s' does not compile (see errors)" % _selected)
+		_log("Audition: event '%s' does not compile (see errors)" % _selected, "warn")
+		%MenuBar.set_playing(false)
 		return
 	_auditioner.play(tree, _audio_dir(), backend.buses, backend.bus_volumes, backend.variables)
 
-## OS drag-and-drop import (Soundly/Explorer -> app window). Files are copied
-## into the project's Audio folder (the source of truth); dropping over the
-## event graph also spawns a Sound node at the cursor.
 func _on_files_dropped(files: PackedStringArray) -> void:
+	_import_files(files)
+
+## Copy files into the project's Audio folder (source of truth); dropping over
+## the event graph also spawns a Sound node at the cursor. Shared by the OS
+## drag-drop and the Assets tab "Import Sounds..." button.
+func _import_files(files: PackedStringArray) -> void:
 	DirAccess.make_dir_recursive_absolute(_audio_dir())  # temp mode included
 	var imported: Array = []
 	for f in files:
 		var ext := f.get_extension().to_lower()
 		if not ext in ["wav", "ogg", "mp3"]:
-			push_warning("Import: skipped %s (not wav/ogg/mp3)" % f.get_file())
+			_log("Import: skipped %s (not wav/ogg/mp3)" % f.get_file(), "warn")
 			continue
 		var stem := f.get_file().get_basename()
 		var dest := _audio_dir().path_join(f.get_file())
@@ -617,11 +667,14 @@ func _on_files_dropped(files: PackedStringArray) -> void:
 			n += 1
 		var err := DirAccess.copy_absolute(f, dest)
 		if err != OK:
-			push_error("Import: failed to copy %s (error %d)" % [f.get_file(), err])
+			_log("Import: failed to copy %s (error %d)" % [f.get_file(), err], "error")
 			continue
 		imported.append(dest.get_file())
 	_refresh_assets_list()
-	if imported.is_empty() or _selected.is_empty() or _mixer_view or _variables_view:
+	if imported.is_empty():
+		return
+	_log("Imported %d file(s)" % imported.size())
+	if _selected.is_empty() or _mixer_view or _variables_view:
 		return
 	# dropped over the event graph: spawn a Sound node per file at the cursor
 	if not Rect2(Vector2.ZERO, event_graph.size).has_point(event_graph.get_local_mouse_position()):
@@ -661,12 +714,21 @@ func _on_events_list_item_activated(_index: int) -> void:
 ## One shared rename popup; _rename_target picks which list/state it acts on.
 func _open_rename_popup(target: String) -> void:
 	_rename_target = target
-	var list: ItemList = %AssetsList if target == "asset" else events_list
-	if target == "variable":
-		list = %VariablesList
-	var old_name: String = list.get_item_text(list.get_selected_items()[0])
-	if target == "variable":
-		old_name = old_name.split("  ")[0]
+	var old_name: String
+	if target == "bank":
+		var sel: TreeItem = %BanksTree.get_selected()
+		# top-level items' parent is the Tree's hidden ROOT item (not null!);
+		# event rows have a bank item as parent
+		if sel == null or sel.get_parent() != %BanksTree.get_root():
+			return
+		old_name = str(sel.get_metadata(0))
+	else:
+		var list: ItemList = %AssetsList if target == "asset" else events_list
+		if target == "variable":
+			list = %VariablesList
+		old_name = list.get_item_text(list.get_selected_items()[0])
+		if target == "variable":
+			old_name = old_name.split("  ")[0]
 	%RenamePopup.title = "Rename %s" % old_name
 	%RenameField.text = old_name
 	%RenameField.select_all()
@@ -677,15 +739,31 @@ func _on_rename_popup_confirmed() -> void:
 	var list: ItemList = %AssetsList if _rename_target == "asset" else events_list
 	if _rename_target == "variable":
 		list = %VariablesList
-	var sel: Array = list.get_selected_items()
-	if sel.is_empty():
-		return
-	var idx: int = sel[0]
-	var old_name: String = list.get_item_text(idx)
-	if _rename_target == "variable":
-		old_name = old_name.split("  ")[0]
+	var old_name: String
+	if _rename_target == "bank":
+		old_name = str(%BanksTree.get_selected().get_metadata(0))
+	else:
+		var sel: Array = list.get_selected_items()
+		if sel.is_empty():
+			return
+		old_name = list.get_item_text(sel[0])
+		if _rename_target == "variable":
+			old_name = old_name.split("  ")[0]
 	var new_name: String = %RenameField.text.strip_edges()
 	if new_name.is_empty() or new_name == old_name:
+		return
+	if _rename_target == "bank":
+		backend.push_undo()
+		if backend.banks.has(new_name):
+			_log("Bank '%s' already exists" % new_name, "warn")
+			return
+		var new_banks := {}
+		for b: String in backend.banks:
+			new_banks[new_name if b == old_name else b] = backend.banks[b]
+		backend.banks = new_banks
+		if _active_bank == old_name:
+			_active_bank = new_name
+		_build_banks_tree()
 		return
 	if _rename_target == "variable":
 		backend.push_undo()
@@ -704,11 +782,11 @@ func _on_rename_popup_confirmed() -> void:
 		if new_name.get_extension().is_empty():
 			new_name += "." + old_name.get_extension()
 		if new_name.get_extension() != old_name.get_extension():
-			push_warning("Keep the same extension: ", old_name.get_extension())
+			_log("Keep the same extension: " + old_name.get_extension(), "warn")
 			return
 		var rename_err := DirAccess.rename_absolute(_audio_dir().path_join(old_name), _audio_dir().path_join(new_name))
 		if rename_err != OK:
-			push_error("Rename failed: error code %d" % rename_err)
+			_log("Rename failed: error code %d" % rename_err, "error")
 			return
 		# Keep every event pointing at the renamed file.
 		for e_props: Dictionary in backend.events.values():
@@ -719,7 +797,7 @@ func _on_rename_popup_confirmed() -> void:
 			_build_graph()
 	else:
 		if not backend.rename_event(old_name, new_name):
-			push_warning("Event '%s' already exists" % new_name)
+			_log("Event '%s' already exists" % new_name, "warn")
 			return
 		if _selected == old_name:
 			_selected = new_name
@@ -733,7 +811,11 @@ func _refresh_events_list() -> void:
 	events_list.clear()
 	# list mirrors canvases (the source of truth), NOT compiled events —
 	# an event that fails compile must stay visible and editable
+	# filtered to the active bank (selected in the Banks tab)
+	var bank_events: Array = backend.banks.get(_active_bank, [])
 	for event_name: String in backend.canvas:
+		if not bank_events.has(event_name):
+			continue
 		events_list.add_item(event_name)
 	for i: int in selected:
 		if i < events_list.item_count:
@@ -745,7 +827,7 @@ func _on_add_event_button_pressed() -> void:
 	while backend.events.has(name):
 		_new_event_counter += 1
 		name = "new_event_%d" % _new_event_counter
-	backend.create_event(name)
+	backend.create_event(name, _active_bank)
 	_refresh_events_list()
 
 func _on_events_list_item_selected(index: int) -> void:
@@ -842,6 +924,66 @@ func _id_from_name(node_name: String) -> int:
 		return -1
 	return int(node_name.substr(1))
 
+## Active bank: the one selected in the Banks tree. Filters the Events list
+## and receives newly created events.
+var _active_bank := "Main"
+
+## ============ Banks tab ============
+
+## Lists the soundbanks the export produces. Every event lives in exactly one
+## bank; new events default to "Main".
+func _build_banks_tree() -> void:
+	var tree: Tree = %BanksTree
+	tree.clear()
+	for bank_name: String in backend.banks:
+		var bank_item := tree.create_item()
+		var n: int = backend.banks[bank_name].size()
+		bank_item.set_text(0, "%s (%d %s)" % [bank_name, n, "event" if n == 1 else "events"])
+		bank_item.set_metadata(0, bank_name)
+		# banks read as headers (accent color); events stay muted and indented
+		bank_item.set_custom_color(0, ACCENT2)
+		for event_name: String in backend.banks[bank_name]:
+			var ev_item := tree.create_item(bank_item)
+			ev_item.set_text(0, event_name)
+			ev_item.set_custom_color(0, FG_TEXT)
+		if bank_name == _active_bank:
+			bank_item.select(0)
+
+## Clicking a bank row makes it the active bank (Events tab shows its events;
+## new events land in it).
+func _on_bank_selected() -> void:
+	var sel: TreeItem = %BanksTree.get_selected()
+	if sel == null or sel.get_parent() != %BanksTree.get_root():
+		return
+	var bank_name: String = str(sel.get_metadata(0))
+	if bank_name == _active_bank:
+		return
+	_active_bank = bank_name
+	_refresh_events_list()
+	_log("Active bank: " + bank_name)
+
+func _on_add_bank_button_pressed() -> void:
+	var n := 1
+	var name := "Bank%d" % n
+	while backend.banks.has(name) or name == "Main":
+		n += 1
+		name = "Bank%d" % n
+	backend.add_bank(name)
+	_build_banks_tree()
+	_log("Bank added: " + name)
+
+## Double-click on a top-level bank row: rename it.
+func _on_banks_tree_activated() -> void:
+	_open_rename_popup("bank")
+
+## ============ Console (bottom panel) ============
+
+## Append a timestamped, colored line to the console. Connected to
+## backend.logged; call directly for frontend messages.
+func _log(message: String, level: String = "info") -> void:
+	var color: String = {"info": "a0a0a0", "warn": "ffdd66", "error": "ff6666"}.get(level, "a0a0a0")
+	_console_log.append_text("[color=#%s]%s  %s[/color]\n" % [color, Time.get_time_string_from_system(), message])
+
 func _delete_selected_nodes() -> void:
 	if _selected_node_names.is_empty() or _selected.is_empty():
 		return
@@ -897,11 +1039,13 @@ func _build_bus_graph() -> void:
 			node.add_child(rename_edit)
 		# One slot row per incoming child (so each connection gets its own pin),
 		# min 1 row. Output (right) only on row 0, only for non-Master buses.
+		# Non-Master buses always keep an input pin so another bus can route
+		# into them even before they have children.
 		var incoming: int = all_buses.values().count(bus_name)
 		var rows: int = maxi(incoming, 1)
 		for row in rows:
 			node.add_child(HSeparator.new())
-			var enable_left: bool = row < incoming
+			var enable_left: bool = bus_name != "Master" and row < maxi(incoming, 1)
 			var enable_right: bool = row == 0 and bus_name != "Master"
 			node.set_slot(row, enable_left, 0, Color.WHITE, enable_right, 0, Color.WHITE)
 		# children at x=40 (stacked vertically), Master at the right — data flows left to right
@@ -944,7 +1088,7 @@ func _rename_bus(old_name: String, new_name: String) -> void:
 	if new_name.is_empty() or new_name == old_name or new_name == "Master":
 		return
 	if backend.buses.has(new_name):
-		push_warning("Bus '%s' already exists" % new_name)
+		_log("Bus '%s' already exists" % new_name, "warn")
 		return
 	# rebuild dict preserving order
 	var new_buses := {}
@@ -976,6 +1120,13 @@ func _on_bus_volume_changed(value: float, bus_name: String) -> void:
 func _clear_volume_pending() -> void:
 	_volume_undo_pending = false
 func _on_bus_connection_request(from: StringName, from_port: int, to: StringName, to_port: int) -> void:
+	# Reject edges that would make `from` its own ancestor (bus cycle).
+	var walk: String = String(to)
+	while not walk.is_empty() and backend.buses.has(walk):
+		if walk == String(from):
+			_log("Bus routing: cannot create a cycle", "warn")
+			return
+		walk = backend.buses[walk]
 	backend.push_undo()
 	if to == "Master" or backend.buses.has(String(to)):
 		backend.buses[String(from)] = String(to)
@@ -992,13 +1143,15 @@ func _on_export_button_pressed() -> void:
 		save_project()  # durability first: authoring state always persists on export
 	file_dialog.popup_centered()
 
+## Export: one .tres per bank. Single-bank projects use the chosen filename;
+## multi-bank projects save each bank as <BankName>.tres in the chosen folder.
 func _on_file_dialog_file_selected(path: String) -> void:
 	if not path.ends_with(".tres"):
 		path += ".tres"
 
 	backend.compile_all()
 	var dir := path.get_base_dir()
-	var bank: Resource = load("res://addons/middot_audio/SoundBank.gd").new()
+	# verify every referenced file exists, copy each once into the export dir
 	for event_props: Dictionary in backend.events.values():
 		var files: Array = []
 		NodeTypes.collect_files_dispatch(event_props, files)
@@ -1007,18 +1160,25 @@ func _on_file_dialog_file_selected(path: String) -> void:
 				continue
 			var source := _audio_dir().path_join(audio_file)
 			if not FileAccess.file_exists(source):
-				push_error("Missing audio file for event: ", source)
+				_log("Missing audio file for event: " + source, "error")
 				return
 			var copy_err := DirAccess.copy_absolute(source, dir.path_join(audio_file))
 			if copy_err != OK:
-				push_error("Failed to copy %s: error code %d" % [audio_file, copy_err])
+				_log("Failed to copy %s: error code %d" % [audio_file, copy_err], "error")
 				return
-	bank.events = backend.events.duplicate(true)
-	bank.buses = backend.buses.duplicate(true)
-	bank.bus_volumes = backend.bus_volumes.duplicate(true)
-
-	var err := ResourceSaver.save(bank, path)
-	if err == OK:
-		print("Soundbank saved: ", path)
-	else:
-		push_error("Failed to save resource. Godot Error Code: ", err)
+	var multi: bool = backend.banks.size() > 1
+	for bank_name: String in backend.banks:
+		var bank: Resource = load("res://addons/middot_audio/SoundBank.gd").new()
+		for event_name: String in backend.banks[bank_name]:
+			if backend.events.has(event_name):
+				bank.events[event_name] = backend.events[event_name]
+		if bank.events.is_empty():
+			continue  # nothing compiled in this bank
+		bank.buses = backend.buses.duplicate(true)
+		bank.bus_volumes = backend.bus_volumes.duplicate(true)
+		var out: String = dir.path_join(bank_name + ".tres") if multi else path
+		var err := ResourceSaver.save(bank, out)
+		if err == OK:
+			_log("Soundbank saved: " + out)
+		else:
+			_log("Failed to save resource. Godot Error Code: %d" % err, "error")

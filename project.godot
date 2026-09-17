@@ -26,6 +26,10 @@ driver/enable_input=true
 
 NodeTypes="*res://nodes/NodeTypes.gd"
 
+[display]
+
+window/size/mode=2
+
 [gui]
 
 theme/custom="res://Themes/space-worm-theme/space_worm_theme.tres"

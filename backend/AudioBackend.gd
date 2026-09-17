@@ -16,6 +16,7 @@ extends RefCounted
 ## changed) so the frontend refreshes precisely what it shows.
 
 signal changed(what: String)          # "canvas", "events", "variables", "buses", "project"
+signal logged(level: String, message: String)  # "info", "warn", "error" -> UI console
 signal undo_stack_changed
 
 const UNDO_LIMIT := 50
@@ -23,6 +24,7 @@ const UNDO_LIMIT := 50
 var project_path := ""
 var events := {}          # compiled event trees
 var canvas := {}          # per-event free-canvas graphs
+var banks := {"Main": []} # bank name -> event names ("Main" implicit default)
 var variables := {}
 var buses := {}
 var bus_volumes := {}
@@ -54,6 +56,7 @@ func _snapshot() -> Dictionary:
 		"variables": variables.duplicate(true),
 		"buses": buses.duplicate(true),
 		"bus_volumes": bus_volumes.duplicate(true),
+		"banks": banks.duplicate(true),
 	}
 
 func _restore(snap: Dictionary) -> void:
@@ -62,6 +65,7 @@ func _restore(snap: Dictionary) -> void:
 	variables = snap["variables"]
 	buses = snap["buses"]
 	bus_volumes = snap["bus_volumes"]
+	banks = snap["banks"]
 	changed.emit("all")
 
 func enable_undo() -> void:
@@ -262,16 +266,29 @@ func delete_variable(name: String) -> void:
 
 ## ---- events (list-level) ----------------------------------------------------
 
-func create_event(event_name: String) -> void:
+func create_event(event_name: String, bank_name: String = "Main") -> void:
+	if not banks.has(bank_name) and not banks.is_empty():
+		bank_name = banks.keys()[0]  # "Main" may have been renamed
 	push_undo()
 	ensure_canvas(event_name)
 	events[event_name] = {}
+	banks.get_or_add(bank_name, []).append(event_name)
 	changed.emit("events")
+
+func add_bank(bank_name: String) -> void:
+	if bank_name.is_empty() or banks.has(bank_name):
+		return
+	push_undo()
+	banks[bank_name] = []
+	changed.emit("events")
+
 
 func delete_event(event_name: String) -> void:
 	push_undo()
 	canvas.erase(event_name)
 	events.erase(event_name)
+	for b: String in banks:
+		banks[b].erase(event_name)
 	changed.emit("all")
 
 func rename_event(old_name: String, new_name: String) -> bool:
@@ -282,6 +299,10 @@ func rename_event(old_name: String, new_name: String) -> bool:
 	events.erase(old_name)
 	canvas[new_name] = canvas[old_name]
 	canvas.erase(old_name)
+	for b: String in banks:
+		var i: int = banks[b].find(old_name)
+		if i != -1:
+			banks[b][i] = new_name
 	changed.emit("events")
 	return true
 
@@ -307,7 +328,7 @@ func compile_event(event_name: String) -> Dictionary:
 			out = n
 			break
 	if out.is_empty():
-		push_error("Compile: event '%s' has no Event Output node -- skipped" % event_name)
+		_log("Compile: event '%s' has no Event Output node -- skipped" % event_name)
 		return {}
 	# Root = the node that nothing feeds into (no wire targets it). The Output
 	# node carries event props only. Sounds wired straight into Output are
@@ -331,14 +352,14 @@ func compile_event(event_name: String) -> Dictionary:
 		roots.append(out_sounds[0])  # single sound -> simple event
 	if roots.is_empty():
 		if out_sounds.size() > 1:
-			push_error("Compile: event '%s' has %d sounds wired straight into Output -- route them through a Trigger node (Playlist/Random)" % [event_name, out_sounds.size()])
+			_log("Compile: event '%s' has %d sounds wired straight into Output -- route them through a Trigger node (Playlist/Random)" % [event_name, out_sounds.size()])
 			assert(false, "Compile: multiple sounds into Output")
 			return {}
-		push_error("Compile: event '%s' has no root node (wire your triggers together) -- skipped" % event_name)
+		_log("Compile: event '%s' has no root node (wire your triggers together) -- skipped" % event_name)
 		assert(false, "Compile: no root trigger found")
 		return {}
 	if roots.size() > 1:
-		push_error("Compile: event '%s' has %d unparented roots -- connect them or delete extras" % [event_name, roots.size()])
+		_log("Compile: event '%s' has %d unparented roots -- connect them or delete extras" % [event_name, roots.size()])
 		assert(false, "Compile: multiple roots")
 		return {}
 	var visited := {}
@@ -353,11 +374,11 @@ func compile_event(event_name: String) -> Dictionary:
 
 func _compile_node(id: int, c: Dictionary, event_name: String, visited: Dictionary, depth: int, out_id: int) -> Dictionary:
 	if depth > 16:
-		push_error("Compile: event '%s' nesting deeper than 16" % event_name)
+		_log("Compile: event '%s' nesting deeper than 16" % event_name)
 		assert(false, "Compile: runaway nesting")
 		return {}
 	if visited.has(id):
-		push_error("Compile: event '%s' has a cycle at node %d" % [event_name, id])
+		_log("Compile: event '%s' has a cycle at node %d" % [event_name, id])
 		assert(false, "Compile: cycle in trigger graph")
 		return {}
 	visited[id] = true
@@ -413,7 +434,7 @@ func _compile_node(id: int, c: Dictionary, event_name: String, visited: Dictiona
 				branches.append(child)
 				out_bcs.append(bc)
 			return {"trigger": "conditional", "branches": branches, "branch_conditions": out_bcs}
-	push_error("Compile: event '%s' node type '%s' cannot play audio" % [event_name, node["type"]])
+	_log("Compile: event '%s' node type '%s' cannot play audio" % [event_name, node["type"]])
 	return {}
 
 func _compile_children(node: Dictionary, c: Dictionary, event_name: String, visited: Dictionary, depth: int, out_id: int) -> Array:
@@ -487,13 +508,23 @@ func _migrate_child(child, nodes: Array, wires: Array, next_id: Array, pos: Vect
 ## save/load file dialogs).
 func to_dict() -> Dictionary:
 	compile_all()
+	# JSON can't store Vector2 (it becomes the string "(x, y)"), so write
+	# node positions as plain {x, y} dicts.
+	var graph: Dictionary = {}
+	for ev: String in canvas:
+		var c: Dictionary = canvas[ev]
+		var nodes: Array = c["nodes"].duplicate(true)
+		for n in nodes:
+			n["pos"] = {"x": n["pos"].x, "y": n["pos"].y}
+		graph[ev] = {"nodes": nodes, "wires": c["wires"], "next_id": c["next_id"]}
 	return {
 		"format_version": 2,
-		"graph": canvas,
+		"graph": graph,
 		"events": events,
 		"buses": buses,
 		"bus_volumes": bus_volumes,
 		"variables": variables,
+		"banks": banks,
 	}
 
 func from_dict(data: Dictionary) -> void:
@@ -507,11 +538,27 @@ func from_dict(data: Dictionary) -> void:
 		var c: Dictionary = canvas[ev]
 		for n in c["nodes"]:
 			n["id"] = int(n["id"])
+			var p: Variant = n.get("pos")
+			if p is Dictionary:
+				n["pos"] = Vector2(p.get("x", 0.0), p.get("y", 0.0))
+			elif not p is Vector2:
+				n["pos"] = Vector2.ZERO  # legacy save wrote an unusable string
 		for w in c["wires"]:
 			w["from"] = int(w["from"])
 			w["to"] = int(w["to"])
 		c["next_id"] = int(c.get("next_id", 0))
 	events = data.get("events", {})
+	banks = data.get("banks", {"Main": []})
+	if not banks.has("Main"):
+		banks["Main"] = []
+	# legacy saves: every event must live in some bank
+	for ev: String in events:
+		if not banks.values().any(func(arr): return ev in arr):
+			banks["Main"].append(ev)
 	if canvas.is_empty():
 		migrate_legacy()
 	changed.emit("project")
+
+## Log through the UI console (Main connects to `logged`).
+func _log(message: String, level: String = "error") -> void:
+	logged.emit(level, message)

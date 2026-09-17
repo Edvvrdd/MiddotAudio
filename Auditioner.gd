@@ -1,6 +1,8 @@
 class_name Auditioner
 extends Node
 
+signal playing_changed(playing: bool)
+
 ## Audition: plays a compiled event tree in the authoring app (F5 preview).
 ## Honors trigger semantics (simple/random/shuffle/playlist/sync/conditional),
 ## event bus routing + volume, and the event's looping flag. One root voice;
@@ -13,6 +15,10 @@ var _variables := {}
 var _last_shuffle := -1
 var _tree := {}
 var _base_db := 0.0
+var log_fn: Callable = func(m: String, level: String) -> void: push_warning(m)  # set by Main
+
+func _warn(m: String) -> void:
+	log_fn.call(m, "warn")
 
 func stop() -> void:
 	if _p:
@@ -23,6 +29,7 @@ func stop() -> void:
 			v.queue_free()
 	_voices.clear()
 	_last_shuffle = -1
+	playing_changed.emit(false)
 
 func play(tree: Dictionary, audio_dir: String, buses: Dictionary, bus_volumes: Dictionary, variables: Dictionary) -> void:
 	stop()
@@ -36,6 +43,7 @@ func play(tree: Dictionary, audio_dir: String, buses: Dictionary, bus_volumes: D
 	_base_db = tree.get("volume_db", 0.0)
 	_p.volume_db = _base_db
 	_play_node(_p, tree, _on_tree_done)
+	playing_changed.emit(true)
 
 func _on_tree_done() -> void:
 	if _p == null:
@@ -82,12 +90,12 @@ func _play_node(p: AudioStreamPlayer, t: Dictionary, done: Callable) -> void:
 		"conditional":
 			var pick: Dictionary = _pick_branch(t)
 			if pick.is_empty():
-				push_warning("Audition: no matching branch")
+				_warn("Audition: no matching branch")
 				done.call()
 			else:
 				_play_node(p, pick, done)
 		_:
-			push_warning("Audition: unknown trigger '%s'" % t.get("trigger", ""))
+			_warn("Audition: unknown trigger '%s'" % t.get("trigger", ""))
 			done.call()
 
 func _play_seq(p: AudioStreamPlayer, sounds: Array, i: int, loop: bool, done: Callable) -> void:
@@ -120,7 +128,7 @@ func _play_leaf(p: AudioStreamPlayer, t: Dictionary, done: Callable) -> void:
 		"ogg": stream = AudioStreamOggVorbis.load_from_file(path)
 		"mp3": stream = AudioStreamMP3.load_from_file(path)
 	if stream == null:
-		push_warning("Audition: cannot load %s" % path)
+		_warn("Audition: cannot load %s" % path)
 		done.call()
 		return
 	p.volume_db = _base_db + t.get("file_volume_db", 0.0)
@@ -167,7 +175,7 @@ func _conditions_ok(conds: Array) -> bool:
 				"==": if cur != want: return false
 				"!=": if cur == want: return false
 				_:
-					push_warning("Audition: op '%s' needs a numeric variable (%s)" % [op, param])
+					_warn("Audition: op '%s' needs a numeric variable (%s)" % [op, param])
 					return false
 	return true
 

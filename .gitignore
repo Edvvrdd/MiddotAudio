@@ -1,11 +1,9 @@
 # Agent working notes (local only, not pushed)
 Agents/
+AGENTS.md
 
 # Godot 4+ specific ignores
 .godot/
 /android/
 .DS_Store
-AGENTS.md
 .mcp.json
-*.md
-!README.md
